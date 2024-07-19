@@ -3,7 +3,9 @@
 #include <LiquidCrystal_I2C.h>
 #include <Servo.h>
 Servo myservo;
+WiFiEspClient client;
 #define SERVO_PIN_IN 13
+#define SERVO_PIN_OUT 12
 LiquidCrystal_I2C lcd(0x27,16,4);  // set the LCD address from 0x27 to 0x3f if i2c address is 0x3f
 int row=0;
 SoftwareSerial softserial(A9, A8); // A9 to ESP_TX, A8 to ESP_RX by default
@@ -27,6 +29,7 @@ boolean flag=false;
 
 #define ir_sensor_1 10
 #define ir_sensor_2 9
+#define ir_sensor_3 8
 
 int lightStatus_1 = 0;
 int lightStatus_2 = 0;
@@ -40,6 +43,18 @@ char pass[] = "0#123Joe#"; // replace ****** with your network password
 int status = WL_IDLE_STATUS;
 
 int ledStatus = LOW;
+
+const char* serverApi = "api.thingspeak.com";
+// const int channelID = 2511593;
+// Fonction ThingSpeak
+void WriteToThingSpeak(int fieldNum, int data) {
+  char url[100];
+  sprintf(url, "/update?api_key=%s&field%d=%d", "MVLXAI009QUWJL47", fieldNum, data);
+  if (client.connect(serverApi, 80)) {
+    client.print(String("GET ") + url + " HTTP/1.1\r\n" + "Host: " + serverApi + "\r\n" + "Connection: close\r\n\r\n");
+    client.stop();
+  }
+}
 
 WiFiEspServer server(80);
 // use a ring buffer to increase speed and reduce memory allocation
@@ -58,6 +73,7 @@ void setup()
   // capteur Infrarouge 
   pinMode(ir_sensor_1, INPUT);
   pinMode(ir_sensor_2, INPUT);
+  pinMode(ir_sensor_3, INPUT);
 
   // leds
   pinMode(greenLED_1, OUTPUT);
@@ -71,6 +87,7 @@ void setup()
 
   //servo moteur
   pinMode(SERVO_PIN_IN, OUTPUT);
+  pinMode(SERVO_PIN_OUT, OUTPUT);
 
   Serial.begin(9600);   // initialize serial for debugging
   softserial.begin(115200);
@@ -107,19 +124,17 @@ void setup()
     lcd.print(" : disponible");
   }
 }
+unsigned long previousMillis = 0; // Enregistre le dernier appelle de ThingSpeak
+const long interval = 120000; // Intervalle pour le prochain appel ThingSpeak (60 secondes)
 
 void loop()
 {
-  int sensorStatus_1 = digitalRead(ir_sensor_1);
-  int sensorStatus_2 = digitalRead(ir_sensor_2);
-  //Serial.println(sensorStatus_1);
-  if(sensorStatus_1 == 0){
-    open_door();
+  unsigned long currentMillis = millis();
+    // vérifier si c'est le temps de faire appel à ThingSpeak
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis; // Save the current time
+    WriteToThingSpeak(1, 0); // Call the method
   }
-  if(sensorStatus_2 == 0){
-    close_door();
-  }
-
   // lecture du capteur
   lightStatus_1=analogRead(light_sensor_1);
   lightStatus_2=analogRead(light_sensor_2);
@@ -132,6 +147,23 @@ void loop()
   lightStatus(lightStatus_2, redLED_2, greenLED_2, 1);
   lightStatus(lightStatus_3, redLED_3, greenLED_3, 2);
   lightStatus(lightStatus_4, redLED_4, greenLED_4, 3);
+
+  int sensorStatus_1 = digitalRead(ir_sensor_1);
+  int sensorStatus_2 = digitalRead(ir_sensor_2);
+  int sensorStatus_3 = digitalRead(ir_sensor_3);
+  //Serial.println(sensorStatus_1);
+  if(sensorStatus_1 == 0){
+    open_door(SERVO_PIN_IN);
+  }
+  if(sensorStatus_2 == 0){
+    close_door(SERVO_PIN_IN);
+    WriteToThingSpeak(1, 1);
+  }
+  if(sensorStatus_3 == 0){
+    close_door(SERVO_PIN_OUT);
+    delay(5000);
+    open_door(SERVO_PIN_OUT);
+  }
 
   WiFiEspClient client = server.available();  // listen for incoming clients
 
@@ -188,21 +220,22 @@ void placesDisponible(boolean dispo, int i){
   }
 }
 
-void open_door() {
-    myservo.attach(SERVO_PIN_IN); 
+void open_door(int servo) {
+    myservo.attach(servo); 
     delay(300);
-    myservo.write(180);//servo goes to 0 degrees 
+    myservo.write(90);//servo goes to 0 degrees 
      delay(400);
     myservo.detach(); // save current of servo
-    digitalWrite(SERVO_PIN_IN,LOW);
+    digitalWrite(servo,LOW);
 }
-void close_door() {
-    myservo.attach(SERVO_PIN_IN); 
+void close_door(int servo) {
+    myservo.attach(servo); 
     delay(300);
     myservo.write(0);//servo goes to 0 degrees 
      delay(400);
     myservo.detach(); // save current of servo
-    digitalWrite(SERVO_PIN_IN,LOW);
+    digitalWrite(servo,LOW);
+    //delay(5000);
 }
 
 void sendHttpResponse(WiFiEspClient client)
